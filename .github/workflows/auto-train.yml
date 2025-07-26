@@ -9,86 +9,70 @@ on:
 env:
   HF_TOKEN: ${{ secrets.HF_TOKEN }}
   DATASET_NAME: "vinoku89/svg-code-generation"
+  MLFLOW_TRACKING_URI: "http://localhost:5000"
 
 jobs:
   check-and-retrain:
     runs-on: self-hosted
-    timeout-minutes: 60  # 8 hours timeout for long training jobs
+    timeout-minutes: 480
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    - name: Clean environment variables
+    - name: Clean environment
       run: |
         unset VIRTUAL_ENV
         unset CONDA_DEFAULT_ENV
-        echo "Environment cleaned"
         
-    - name: Verify GPU availability
+    - name: Verify GPU
       run: |
-        nvidia-smi
-        echo "CUDA Version: $(nvcc --version || echo 'CUDA not found')"
-        echo "GPU verification complete"
+        nvidia-smi || { echo "GPU not available"; exit 1; }
         
-    - name: Install uv (if not already installed)
+    - name: Install dependencies
       run: |
-        if ! command -v uv &> /dev/null; then
-          echo "Installing uv..."
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          source $HOME/.cargo/env
-        fi
-        uv --version
+        uv sync --reinstall || { echo "Failed to install dependencies"; exit 1; }
         
-    - name: Install dependencies with uv
+    - name: Verify MLflow server
       run: |
-        echo "Installing dependencies..."
-        uv sync --reinstall
-        echo "Dependencies installed successfully"
+        curl -f http://localhost:5000/health || { echo "MLflow server not running at localhost:5000"; exit 1; }
+        echo "MLflow server is accessible"
         
     - name: Verify HuggingFace token
       run: |
-        if [ -z "$HF_TOKEN" ]; then
-          echo "ERROR: HF_TOKEN not found in secrets"
-          exit 1
-        fi
-        echo "HuggingFace token verified"
+        [ -n "$HF_TOKEN" ] || { echo "HF_TOKEN not found"; exit 1; }
         
     - name: Check dataset updates
       id: check_updates
       run: |
-        echo "Checking for dataset updates..."
-        uv run --isolated python ./src/check_dataset_update.py
+        uv run --isolated python ./src/check_dataset_update.py || { echo "Dataset check failed"; exit 1; }
         
     - name: Train model
       if: steps.check_updates.outputs.should_retrain == 'true'
       run: |
         echo "Starting model training..."
-        uv run --isolated python ./src/train_llm.py
-        if [ $? -eq 0 ]; then
-          echo "Model training completed successfully"
-        else
-          echo "Model training failed"
-          exit 1
-        fi
+        uv run --isolated python ./src/train_llm.py || { echo "Model training failed"; exit 1; }
+        echo "Model training completed"
+        
+    - name: Register model in MLflow
+      if: steps.check_updates.outputs.should_retrain == 'true'
+      run: |
+        echo "Registering model in MLflow..."
+        uv run --isolated python ./src/register_model_mlflow.py || { echo "MLflow registration failed"; exit 1; }
+        echo "Model registered in MLflow"
         
     - name: Upload to Hugging Face
       if: steps.check_updates.outputs.should_retrain == 'true'
       run: |
-        echo "Uploading model to HuggingFace..."
-        uv run --isolated python ./src/upload_model_to_hf.py
-        if [ $? -eq 0 ]; then
-          echo "Model uploaded successfully to HuggingFace"
-        else
-          echo "Failed to upload model to HuggingFace"
-          exit 1
-        fi
+        echo "Uploading to HuggingFace..."
+        uv run --isolated python ./src/upload_model_to_hf.py || { echo "HuggingFace upload failed"; exit 1; }
+        echo "Model uploaded to HuggingFace"
         
-    - name: Log training completion
+    - name: Log completion
       if: steps.check_updates.outputs.should_retrain == 'true'
       run: |
-        echo "Training workflow completed at $(date)"
-        echo "Model trained and uploaded successfully"
+        echo "Training workflow completed successfully at $(date)"
+        echo "Model trained, registered in MLflow, and uploaded to HuggingFace"
         
     - name: Log no training needed
       if: steps.check_updates.outputs.should_retrain != 'true'
@@ -98,26 +82,15 @@ jobs:
     - name: Cleanup GPU memory
       if: always()
       run: |
-        echo "Cleaning up GPU memory..."
         uv run --isolated python -c "
         try:
             import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                print('GPU cache cleared successfully')
-            else:
-                print('No CUDA available for cleanup')
-        except ImportError:
-            print('PyTorch not available for cleanup')
-        except Exception as e:
-            print(f'Cleanup warning: {e}')
+            torch.cuda.empty_cache() if torch.cuda.is_available() else None
+            print('GPU memory cleared')
+        except: pass
         "
         
     - name: Cleanup workspace
       if: always()
       run: |
-        echo "Cleaning up temporary files..."
-        # Remove any temporary model files if they exist
-        rm -rf ./tmp_models/ 2>/dev/null || true
-        rm -rf ./.cache/ 2>/dev/null || true
-        echo "Workspace cleanup complete"
+        rm -rf ./tmp_models/ ./.cache/ 2>/dev/null || true
