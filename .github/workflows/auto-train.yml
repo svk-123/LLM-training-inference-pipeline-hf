@@ -2,9 +2,8 @@ name: Auto Retrain Model
 
 on:
   schedule:
-    # Check for dataset updates every 6 hours
     - cron: '0 */6 * * *'
-  workflow_dispatch: # Manual trigger option
+  workflow_dispatch:
   
 env:
   HF_TOKEN: ${{ secrets.HF_TOKEN }}
@@ -17,11 +16,20 @@ jobs:
     timeout-minutes: 480
     
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
+    - name: Setup project directory
+      run: |
+        cd /home/vino/ML_Projects/End-to-end-llm-pipeline-huggingface
+        echo "WORK_DIR=/home/vino/ML_Projects/End-to-end-llm-pipeline-huggingface" >> $GITHUB_ENV
+        echo "Working in: $(pwd)"
+        
+    - name: Update code from repository
+      run: |
+        cd $WORK_DIR
+        git pull origin main || echo "Git pull failed or no changes"
+        
     - name: Clean environment
       run: |
+        cd $WORK_DIR
         unset VIRTUAL_ENV
         unset CONDA_DEFAULT_ENV
         
@@ -31,12 +39,12 @@ jobs:
         
     - name: Install dependencies
       run: |
+        cd $WORK_DIR
         uv sync --reinstall || { echo "Failed to install dependencies"; exit 1; }
         
     - name: Verify MLflow server
       run: |
-        curl -f http://localhost:5000/health || { echo "MLflow server not running at localhost:5000"; exit 1; }
-        echo "MLflow server is accessible"
+        curl -f http://localhost:5000/health || { echo "MLflow server not running"; exit 1; }
         
     - name: Verify HuggingFace token
       run: |
@@ -45,34 +53,54 @@ jobs:
     - name: Check dataset updates
       id: check_updates
       run: |
+        cd $WORK_DIR
         uv run --isolated python ./src/check_dataset_update.py || { echo "Dataset check failed"; exit 1; }
         
     - name: Train model
       if: steps.check_updates.outputs.should_retrain == 'true'
       run: |
-        echo "Starting model training..."
-        uv run --isolated python ./src/train_llm.py || { echo "Model training failed"; exit 1; }
-        echo "Model training completed"
+        cd $WORK_DIR
+        echo "Training model in: $(pwd)"
+        uv run --isolated python ./src/train_llm.py || { echo "Training failed"; exit 1; }
+        
+        # Verify model was created
+        if [ -d "./models" ]; then
+          echo "Model saved successfully:"
+          find ./models -type f -name "*.safetensors" -o -name "*.bin" | head -5
+        else
+          echo "ERROR: Models directory not created"; exit 1;
+        fi
         
     - name: Register model in MLflow
       if: steps.check_updates.outputs.should_retrain == 'true'
       run: |
-        echo "Registering model in MLflow..."
+        cd $WORK_DIR
         uv run --isolated python ./src/register_model_mlflow.py || { echo "MLflow registration failed"; exit 1; }
-        echo "Model registered in MLflow"
         
     - name: Upload to Hugging Face
       if: steps.check_updates.outputs.should_retrain == 'true'
       run: |
-        echo "Uploading to HuggingFace..."
+        cd $WORK_DIR
         uv run --isolated python ./src/upload_model_to_hf.py || { echo "HuggingFace upload failed"; exit 1; }
-        echo "Model uploaded to HuggingFace"
+        
+    - name: Verify final model location
+      if: steps.check_updates.outputs.should_retrain == 'true'
+      run: |
+        cd $WORK_DIR
+        echo "Final model verification:"
+        echo "Current directory: $(pwd)"
+        if [ -d "./models/lora" ]; then
+          echo "Latest models in ./models/lora:"
+          ls -la ./models/lora/ | tail -3
+          echo "Model files saved locally at: $WORK_DIR/models/lora/"
+        fi
         
     - name: Log completion
       if: steps.check_updates.outputs.should_retrain == 'true'
       run: |
-        echo "Training workflow completed successfully at $(date)"
-        echo "Model trained, registered in MLflow, and uploaded to HuggingFace"
+        echo "Training completed at $(date)"
+        echo "Models saved to: $WORK_DIR/models/lora/"
+        echo "MLflow: http://localhost:5000"
         
     - name: Log no training needed
       if: steps.check_updates.outputs.should_retrain != 'true'
@@ -82,6 +110,7 @@ jobs:
     - name: Cleanup GPU memory
       if: always()
       run: |
+        cd $WORK_DIR
         uv run --isolated python -c "
         try:
             import torch
@@ -89,8 +118,3 @@ jobs:
             print('GPU memory cleared')
         except: pass
         "
-        
-    - name: Cleanup workspace
-      if: always()
-      run: |
-        rm -rf ./tmp_models/ ./.cache/ 2>/dev/null || true
