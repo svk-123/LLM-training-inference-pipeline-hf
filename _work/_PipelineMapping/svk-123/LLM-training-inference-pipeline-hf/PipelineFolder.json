@@ -1,0 +1,12 @@
+﻿{
+  "repositoryName": "svk-123/LLM-training-inference-pipeline-hf",
+  "pipelineDirectory": "LLM-training-inference-pipeline-hf",
+  "workspaceDirectory": "LLM-training-inference-pipeline-hf/LLM-training-inference-pipeline-hf",
+  "repositories": {
+    "svk-123/LLM-training-inference-pipeline-hf": {
+      "repositoryPath": "LLM-training-inference-pipeline-hf/LLM-training-inference-pipeline-hf",
+      "lastRunOn": "07/26/2025 18:11:36 +08:00"
+    }
+  },
+  "lastRunOn": "07/26/2025 18:11:36 +08:00"
+}
