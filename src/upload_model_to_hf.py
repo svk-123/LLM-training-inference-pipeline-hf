@@ -43,10 +43,35 @@ def get_model_path_from_mlflow():
         print(f"   Model Source: {model_source}")
         print(f"   Run Name: {run_name}")
         
+        # Handle different model source formats
         if model_source.startswith("file://"):
             local_model_path = model_source.replace("file://", "")
+        elif model_source.startswith("models:/"):
+            # Download the model from MLflow registry to a temporary location
+            import tempfile
+            temp_dir = tempfile.mkdtemp()
+            local_model_path = mlflow.artifacts.download_artifacts(
+                artifact_uri=model_source,
+                dst_path=temp_dir
+            )
+            print(f"   Downloaded model to: {local_model_path}")
         else:
-            local_model_path = f"./models/lora/{run_name}"
+            # Fallback: try to download using the run_id
+            try:
+                run = client.get_run(latest_version.run_id)
+                artifact_uri = run.info.artifact_uri
+                model_artifact_path = f"{artifact_uri}/model"
+                
+                import tempfile
+                temp_dir = tempfile.mkdtemp()
+                local_model_path = mlflow.artifacts.download_artifacts(
+                    artifact_uri=model_artifact_path,
+                    dst_path=temp_dir
+                )
+                print(f"   Downloaded model from run artifacts to: {local_model_path}")
+            except Exception as e:
+                print(f"   Failed to download from run artifacts: {e}")
+                return None, None
         
         if not os.path.exists(local_model_path):
             print(f"Model path does not exist: {local_model_path}")
