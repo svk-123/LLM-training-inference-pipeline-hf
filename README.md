@@ -44,3 +44,9 @@ svg_code = generated_text[len(prompt):].strip()
 print("Generated SVG:")
 print(svg_code)
 ```
+
+```
+# before running github actions, mlflow server should be started
+mlflow ui --backend-store-uri ./mlruns
+MLFLOW_TRACKING_URI: "http://localhost:5000"
+```
