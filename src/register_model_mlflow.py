@@ -1,6 +1,9 @@
 import os
 import mlflow
+import mlflow.transformers
 from mlflow.tracking import MlflowClient
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from unsloth import FastLanguageModel
 
 def find_best_model():
     """Find the best trained model from MLflow experiments"""
@@ -37,6 +40,35 @@ def find_best_model():
         print(f"Error finding best model: {e}")
         return None
 
+def load_model_from_path(model_path):
+    """Load model and tokenizer from local path"""
+    try:
+        print(f"Loading model from: {model_path}")
+        
+        # Try loading with Unsloth first
+        try:
+            model, tokenizer = FastLanguageModel.from_pretrained(
+                model_path,
+                max_seq_length=2048,
+                dtype=None,
+                load_in_4bit=True,
+            )
+            print("Model loaded successfully with Unsloth")
+            return model, tokenizer
+        except Exception as e:
+            print(f"Unsloth loading failed: {e}")
+            print("Trying with transformers...")
+            
+            # Fallback to transformers
+            tokenizer = AutoTokenizer.from_pretrained(model_path)
+            model = AutoModelForCausalLM.from_pretrained(model_path)
+            print("Model loaded successfully with transformers")
+            return model, tokenizer
+            
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        return None, None
+
 def register_in_mlflow(run_id, run_name):
     """Register the best model in MLflow Model Registry"""
     try:
@@ -49,9 +81,6 @@ def register_in_mlflow(run_id, run_name):
             print(f"Model not found at: {local_model_path}")
             return None, None
         
-        # Register model using run URI to maintain linkage
-        model_uri = f"runs:/{run_id}/model"
-        
         # Check if model artifact exists in the run
         client = MlflowClient()
         try:
@@ -59,19 +88,33 @@ def register_in_mlflow(run_id, run_name):
             model_artifact_exists = any(artifact.path == "model" for artifact in artifacts)
             
             if not model_artifact_exists:
-                # Log the local model to the run first
                 print("Model not found in run artifacts, logging model...")
+                
+                # Load the actual model and tokenizer
+                model, tokenizer = load_model_from_path(local_model_path)
+                if model is None or tokenizer is None:
+                    print("Failed to load model, cannot register")
+                    return None, None
+                
+                # Log the model to the existing run
                 with mlflow.start_run(run_id=run_id):
-                    mlflow.transformers.log_model(
-                        transformers_model=local_model_path,
-                        artifact_path="model"
+                    model_info = mlflow.transformers.log_model(
+                        transformers_model={
+                            "model": model,
+                            "tokenizer": tokenizer
+                        },
+                        artifact_path="model",
+                        task="text-generation"
                     )
+                    print(f"Model logged to run: {run_id}")
+                
         except Exception as e:
-            print(f"Warning: Could not check/log model artifacts: {e}")
-            # Fallback to file URI
-            model_uri = f"file://{os.path.abspath(local_model_path)}"
+            print(f"Error checking/logging model artifacts: {e}")
+            return None, None
         
-        # Register model
+        # Register model using run URI
+        model_uri = f"runs:/{run_id}/model"
+        
         model_version = mlflow.register_model(
             model_uri=model_uri,
             name=model_name
@@ -120,7 +163,8 @@ def main():
     print("\nStep 1: Finding best model from MLflow...")
     result = find_best_model()
     if not result:
-        return
+        print("No model found to register")
+        exit(1)
     
     best_run, run_name = result
     print("Best model identified")
@@ -129,8 +173,11 @@ def main():
     print("\nStep 2: Registering model in MLflow...")
     model_name, local_model_path = register_in_mlflow(best_run.info.run_id, run_name)
     if not local_model_path:
-        return
-    print("Model registered in MLflow")   
+        print("Model registration failed")
+        exit(1)
+    
+    print("Model registered in MLflow successfully")
+    print("=" * 50)
 
 if __name__ == "__main__":
     main()
