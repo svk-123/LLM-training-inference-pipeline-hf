@@ -13,19 +13,28 @@ env:
 jobs:
   check-and-retrain:
     runs-on: self-hosted
+    timeout-minutes: 60  # 8 hours timeout for long training jobs
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       
+    - name: Clean environment variables
+      run: |
+        unset VIRTUAL_ENV
+        unset CONDA_DEFAULT_ENV
+        echo "Environment cleaned"
+        
     - name: Verify GPU availability
       run: |
         nvidia-smi
         echo "CUDA Version: $(nvcc --version || echo 'CUDA not found')"
+        echo "GPU verification complete"
         
     - name: Install uv (if not already installed)
       run: |
         if ! command -v uv &> /dev/null; then
+          echo "Installing uv..."
           curl -LsSf https://astral.sh/uv/install.sh | sh
           source $HOME/.cargo/env
         fi
@@ -33,32 +42,82 @@ jobs:
         
     - name: Install dependencies with uv
       run: |
-        uv sync
+        echo "Installing dependencies..."
+        uv sync --reinstall
+        echo "Dependencies installed successfully"
+        
+    - name: Verify HuggingFace token
+      run: |
+        if [ -z "$HF_TOKEN" ]; then
+          echo "ERROR: HF_TOKEN not found in secrets"
+          exit 1
+        fi
+        echo "HuggingFace token verified"
         
     - name: Check dataset updates
       id: check_updates
       run: |
-        uv run python ./src/check_dataset_update.py
+        echo "Checking for dataset updates..."
+        uv run --isolated python ./src/check_dataset_update.py
         
     - name: Train model
       if: steps.check_updates.outputs.should_retrain == 'true'
       run: |
-        uv run python ./src/train_llm.py
+        echo "Starting model training..."
+        uv run --isolated python ./src/train_llm.py
+        if [ $? -eq 0 ]; then
+          echo "Model training completed successfully"
+        else
+          echo "Model training failed"
+          exit 1
+        fi
         
     - name: Upload to Hugging Face
       if: steps.check_updates.outputs.should_retrain == 'true'
       run: |
-        uv run python ./src/upload_model_to_hf.py
+        echo "Uploading model to HuggingFace..."
+        uv run --isolated python ./src/upload_model_to_hf.py
+        if [ $? -eq 0 ]; then
+          echo "Model uploaded successfully to HuggingFace"
+        else
+          echo "Failed to upload model to HuggingFace"
+          exit 1
+        fi
+        
+    - name: Log training completion
+      if: steps.check_updates.outputs.should_retrain == 'true'
+      run: |
+        echo "Training workflow completed at $(date)"
+        echo "Model trained and uploaded successfully"
+        
+    - name: Log no training needed
+      if: steps.check_updates.outputs.should_retrain != 'true'
+      run: |
+        echo "No dataset updates found. Skipping training at $(date)"
         
     - name: Cleanup GPU memory
       if: always()
       run: |
-        python -c "
+        echo "Cleaning up GPU memory..."
+        uv run --isolated python -c "
         try:
             import torch
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-                print('GPU cache cleared')
+                print('GPU cache cleared successfully')
+            else:
+                print('No CUDA available for cleanup')
         except ImportError:
-            pass
+            print('PyTorch not available for cleanup')
+        except Exception as e:
+            print(f'Cleanup warning: {e}')
         "
+        
+    - name: Cleanup workspace
+      if: always()
+      run: |
+        echo "Cleaning up temporary files..."
+        # Remove any temporary model files if they exist
+        rm -rf ./tmp_models/ 2>/dev/null || true
+        rm -rf ./.cache/ 2>/dev/null || true
+        echo "Workspace cleanup complete"
