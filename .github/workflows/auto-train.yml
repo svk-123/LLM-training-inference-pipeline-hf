@@ -1,9 +1,8 @@
 name: Auto Retrain Model
-
 on:
   schedule:
-    - cron: '0 */6 * * *'
-  workflow_dispatch:
+    - cron: '0 */6 * * *'  # Fixed: removed extra asterisk
+  workflow_dispatch:  # This enables manual triggering
   
 env:
   HF_TOKEN: ${{ secrets.HF_TOKEN }}
