@@ -17,18 +17,18 @@ jobs:
     steps:
     - name: Setup project directory
       run: |
-        cd /home/vino/ML_Projects/End-to-end-llm-pipeline-huggingface
+        cd /home/vino/ML_Projects/End-to-end-llm-pipeline-huggingface || exit 1
         echo "WORK_DIR=/home/vino/ML_Projects/End-to-end-llm-pipeline-huggingface" >> $GITHUB_ENV
         echo "Working in: $(pwd)"
         
     - name: Update code from repository
       run: |
-        cd $WORK_DIR
+        cd $WORK_DIR || exit 1
         git pull origin main || echo "Git pull failed or no changes"
         
     - name: Clean environment
       run: |
-        cd $WORK_DIR
+        cd $WORK_DIR || exit 1
         unset VIRTUAL_ENV
         unset CONDA_DEFAULT_ENV
         
@@ -38,7 +38,7 @@ jobs:
         
     - name: Install dependencies
       run: |
-        cd $WORK_DIR
+        cd $WORK_DIR || exit 1
         uv sync --reinstall || { echo "Failed to install dependencies"; exit 1; }
         
     - name: Verify MLflow server
@@ -52,7 +52,7 @@ jobs:
     - name: Check dataset updates
       id: check_updates
       run: |
-        cd $WORK_DIR
+        cd $WORK_DIR || exit 1
         if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
           echo "Manual trigger detected - forcing training"
           echo "should_retrain=true" >> $GITHUB_OUTPUT
@@ -63,7 +63,7 @@ jobs:
     - name: Train model
       if: steps.check_updates.outputs.should_retrain == 'true'
       run: |
-        cd $WORK_DIR
+        cd $WORK_DIR || exit 1
         echo "Training model in: $(pwd)"
         uv run --isolated python ./src/train_llm.py || { echo "Training failed"; exit 1; }
         
@@ -78,19 +78,19 @@ jobs:
     - name: Register model in MLflow
       if: steps.check_updates.outputs.should_retrain == 'true'
       run: |
-        cd $WORK_DIR
+        cd $WORK_DIR || exit 1
         uv run --isolated python ./src/register_model_mlflow.py || { echo "MLflow registration failed"; exit 1; }
         
     - name: Upload to Hugging Face
       if: steps.check_updates.outputs.should_retrain == 'true'
       run: |
-        cd $WORK_DIR
+        cd $WORK_DIR || exit 1
         uv run --isolated python ./src/upload_model_to_hf.py || { echo "HuggingFace upload failed"; exit 1; }
         
     - name: Verify final model location
       if: steps.check_updates.outputs.should_retrain == 'true'
       run: |
-        cd $WORK_DIR
+        cd $WORK_DIR || exit 1
         echo "Final model verification:"
         echo "Current directory: $(pwd)"
         if [ -d "./models/lora" ]; then
@@ -114,7 +114,7 @@ jobs:
     - name: Cleanup GPU memory
       if: always()
       run: |
-        cd $WORK_DIR
+        cd $WORK_DIR || exit 1
         uv run --isolated python -c "
         try:
             import torch
