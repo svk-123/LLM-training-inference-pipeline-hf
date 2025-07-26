@@ -1,8 +1,8 @@
 name: Auto Retrain Model
 on:
   schedule:
-    - cron: '0 */6 * * *'  # Fixed: removed extra asterisk
-  workflow_dispatch:  # This enables manual triggering
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
   
 env:
   HF_TOKEN: ${{ secrets.HF_TOKEN }}
@@ -53,7 +53,12 @@ jobs:
       id: check_updates
       run: |
         cd $WORK_DIR
-        uv run --isolated python ./src/check_dataset_update.py || { echo "Dataset check failed"; exit 1; }
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          echo "Manual trigger detected - forcing training"
+          echo "should_retrain=true" >> $GITHUB_OUTPUT
+        else
+          uv run --isolated python ./src/check_dataset_update.py || { echo "Dataset check failed"; exit 1; }
+        fi
         
     - name: Train model
       if: steps.check_updates.outputs.should_retrain == 'true'
