@@ -6,3 +6,10 @@ uv init
 uv venv .venv --python=python3.11
 source .venv/bin/activate
 ```
+
+# if required:
+uv python pin python3.11
+
+# .env
+HF_USERNAME="huggingface-user-name"
+HF_TOKEN="huggingface-token"

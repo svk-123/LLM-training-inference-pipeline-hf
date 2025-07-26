@@ -3,5 +3,11 @@ name = "end-to-end-llm-pipeline-huggingface"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = "=3.11"
-dependencies = []
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "dataset>=1.6.2",
+    "datasets>=4.0.0",
+    "dotenv>=0.9.9",
+    "huggingface-hub>=0.34.1",
+    "pandas>=2.3.1",
+]
