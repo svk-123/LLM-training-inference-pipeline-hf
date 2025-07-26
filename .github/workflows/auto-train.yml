@@ -1,0 +1,54 @@
+name: Auto Retrain Model
+
+on:
+  schedule:
+    # Check for dataset updates every 6 hours
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # Manual trigger option
+  
+env:
+  HF_TOKEN: ${{ secrets.HF_TOKEN }}
+  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+  DATASET_NAME: "vinoku89/svg-code-generation"
+
+jobs:
+  check-and-retrain:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        version: "latest"
+        
+    - name: Install dependencies with uv
+      run: |
+        uv sync
+        
+    - name: Check dataset updates
+      id: check_updates
+      run: |
+        uv run python ./src/check_dataset_update.py
+        
+    - name: Train model
+      if: steps.check_updates.outputs.should_retrain == 'true'
+      run: |
+        uv run python ./src/train_llm.py
+        
+    - name: Register in MLflow
+      if: steps.check_updates.outputs.should_retrain == 'true'
+      run: |
+        uv run python ./src/register_model_mlflow.py
+        
+    - name: Upload to Hugging Face
+      if: steps.check_updates.outputs.should_retrain == 'true'
+      run: |
+        uv run python ./src/upload_model_to_hf.py
