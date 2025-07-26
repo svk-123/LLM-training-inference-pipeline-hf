@@ -46,7 +46,7 @@ def get_model_path_from_mlflow():
         if model_source.startswith("file://"):
             local_model_path = model_source.replace("file://", "")
         else:
-            local_model_path = f"./models/merged/{run_name}"
+            local_model_path = f"./models/lora/{run_name}"
         
         if not os.path.exists(local_model_path):
             print(f"Model path does not exist: {local_model_path}")
