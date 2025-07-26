@@ -208,3 +208,6 @@ __marimo__/
 
 data/
 models/
+unsloth_compiled_cache/
+outputs/
+mlruns/
