@@ -8,6 +8,7 @@ from transformers import TrainingArguments
 from unsloth import is_bfloat16_supported
 import mlflow
 import torch
+from datetime import datetime
 
 def setup_environment():
     """Setup environment variables and CUDA settings"""
@@ -119,8 +120,30 @@ def prepare_datasets(df_train, df_test, tokenizer):
     
     return dataset_train, dataset_test
 
-def train_model(model, tokenizer, dataset_train, dataset_test, epochs=1, max_seq_length=2048, run_name="training_run"):
+def train_model(model, tokenizer, dataset_train, dataset_test, epochs=1, max_seq_length=2048, run_name="training_run", base_model="", rank=0):
     """Train the model using SFTTrainer"""
+    
+    # Training arguments
+    training_args = TrainingArguments(
+        per_device_train_batch_size=4,
+        gradient_accumulation_steps=4,
+        warmup_steps=5,
+        num_train_epochs=epochs,
+        max_steps=-1,
+        learning_rate=5e-4,
+        fp16=not is_bfloat16_supported(),
+        bf16=is_bfloat16_supported(),
+        logging_steps=10,
+        optim="adamw_8bit",
+        weight_decay=0.01,
+        lr_scheduler_type="linear",
+        seed=123,
+        eval_strategy="steps",
+        eval_steps=10,
+        output_dir="outputs",
+        report_to="mlflow",
+        run_name=run_name,
+    )
     
     trainer = SFTTrainer(
         model=model,
@@ -131,38 +154,28 @@ def train_model(model, tokenizer, dataset_train, dataset_test, epochs=1, max_seq
         max_seq_length=max_seq_length,
         dataset_num_proc=2,
         packing=False,
-        args=TrainingArguments(
-            per_device_train_batch_size=4,
-            gradient_accumulation_steps=4,
-            warmup_steps=5,
-            num_train_epochs=epochs,
-            max_steps=-1,
-            learning_rate=5e-4,
-            fp16=not is_bfloat16_supported(),
-            bf16=is_bfloat16_supported(),
-            logging_steps=10,
-            optim="adamw_8bit",
-            weight_decay=0.01,
-            lr_scheduler_type="linear",
-            seed=123,
-            eval_strategy="steps",
-            eval_steps=10,
-            output_dir="outputs",
-            report_to="mlflow",
-            run_name=run_name,  # Add run name here too
-        ),
+        args=training_args,
     )
     
-    # Log additional parameters to MLflow
+    # Log actual parameters to MLflow
     with mlflow.start_run(run_name=run_name) as run:
-        # Log hyperparameters
+        # Extract actual values from training_args and data
         mlflow.log_params({
-            "model_name": "Qwen3-4B",
+            "model_name": base_model,
             "max_seq_length": max_seq_length,
-            "epochs": epochs,
-            "learning_rate": 5e-4,
-            "batch_size": 4,
-            "gradient_accumulation_steps": 4,
+            "epochs": training_args.num_train_epochs,
+            "learning_rate": training_args.learning_rate,
+            "batch_size": training_args.per_device_train_batch_size,
+            "gradient_accumulation_steps": training_args.gradient_accumulation_steps,
+            "warmup_steps": training_args.warmup_steps,
+            "weight_decay": training_args.weight_decay,
+            "optimizer": training_args.optim,
+            "lr_scheduler": training_args.lr_scheduler_type,
+            "lora_rank": rank,
+            "train_dataset_size": len(dataset_train),
+            "eval_dataset_size": len(dataset_test),
+            "fp16": training_args.fp16,
+            "bf16": training_args.bf16,
         })
         
         print(f"MLflow run started: {run.info.run_id}")
@@ -184,15 +197,16 @@ def save_model(model, tokenizer, run_name):
 def main():
     """Main function to run the entire pipeline"""
     # Configuration
-    base_model = "Qwen3-4B"
+    base_model = "Qwen3-0.6B"
     max_seq_length = 2048
     rank = 64
-    epochs = 5
+    epochs = 1
     dataset_name = "vinoku89/svg-code-generation"
     
     # Create run name
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     train_parameters = f"_lora_fp16_r{rank}_e{epochs}_msl{max_seq_length}"
-    run_name = base_model.replace(".", "").replace("-", "_") + train_parameters
+    run_name = base_model.replace(".", "").replace("-", "_") + train_parameters + f"_{timestamp}"
     
     # Setup
     hf_token = setup_environment()
@@ -211,7 +225,10 @@ def main():
     dataset_train, dataset_test = prepare_datasets(df_train, df_test, tokenizer)
     
     # Train model
-    trainer = train_model(model, tokenizer, dataset_train, dataset_test, epochs, max_seq_length, run_name)
+    trainer = train_model(
+        model, tokenizer, dataset_train, dataset_test, 
+        epochs, max_seq_length, run_name, base_model, rank
+    )
     
     # Save model
     model_path = save_model(model, tokenizer, run_name)
