@@ -90,5 +90,5 @@ print(svg_code)
 ```
 
 ### 8. Deployment on HF Space (WIP)
-- The auto-trained model is deployed in the following HF Space.
+- The trained model is auto-deployed in the following HF Space.
 - https://huggingface.co/spaces/vinoku89/svg-code-generator
