@@ -51,12 +51,12 @@ uv run python ./src/upload_model_to_hf.py
 ```
 
 ### 6. Automated Pipeline
-Automated Pipeline
-The GitHub Actions workflow runs automatically:
-Scheduled: Every 6 hours
-Manual: Via GitHub Actions "Run workflow" button
-Checks: Dataset updates before training
-Deploys: Automatically to HuggingFace Hub
+- Automated Pipeline
+- The GitHub Actions workflow runs automatically:
+- Scheduled: Every 6 hours
+- Manual: Via GitHub Actions "Run workflow" button
+- Checks: Dataset updates before training
+- Deploys: Automatically to HuggingFace Hub
 
 
 ### 7. Model Inference
@@ -89,3 +89,6 @@ print("Generated SVG:")
 print(svg_code)
 ```
 
+### 8. Deployment on HF Space (WIP)
+- The auto-trained model is deployed in the following HF Space.
+- https://huggingface.co/spaces/vinoku89/svg-code-generator
